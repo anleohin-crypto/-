@@ -1,0 +1,6 @@
+{
+  "name": "ניהול קיבולת ומשאבי צוות",
+  "description": "מערכת מתקדמת לניהול קיבולת צוות, עומסים, משימות, שעות Billable, היעדרויות, דדליינים ותכנון עבודה",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
