@@ -23,6 +23,7 @@ import { ExcelService } from '../../services/excelService';
 import { MonthlyCapacityModal } from './MonthlyCapacityModal';
 import { MonthlyStandardQuickModal } from './MonthlyStandardQuickModal';
 import { Employee, Task } from '../../types';
+import { computeDailyCapacityRisks } from '../../services/dailyCapacityService';
 
 export const CapacityView: React.FC = () => {
   const {
@@ -32,6 +33,7 @@ export const CapacityView: React.FC = () => {
     employees,
     clients,
     tasks,
+    absences,
     setCurrentTab,
     openDrilldown,
     settings,
@@ -42,6 +44,7 @@ export const CapacityView: React.FC = () => {
   const [selectedEmpForCapacity, setSelectedEmpForCapacity] = useState<Employee | null>(null);
   const [expandedEmployeeId, setExpandedEmployeeId] = useState<string | null>(null);
   const [isQuickStandardModalOpen, setIsQuickStandardModalOpen] = useState(false);
+  const dailyRisks = computeDailyCapacityRisks(selectedMonth, employees, tasks, absences);
 
   const handleSaveMonthStandard = (month: string, hours: number | null) => {
     const updated = { ...(settings.monthlyStandards || {}) };
@@ -426,6 +429,12 @@ export const CapacityView: React.FC = () => {
             </tfoot>
           </table>
         </div>
+      </div>
+
+      {/* Day-level planning exceptions for recurring tasks */}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between"><div><h3 className="font-bold text-sm flex items-center gap-2"><Calendar className="w-4 h-4 text-indigo-600"/>חריגי קיבולת יומית</h3><p className="text-[11px] text-slate-500">בדיקה לפי המועדים המדויקים של משימות שוטפות והיעדרויות.</p></div><span className={`text-xs font-bold px-2 py-1 rounded ${dailyRisks.length?'bg-rose-50 text-rose-700':'bg-emerald-50 text-emerald-700'}`}>{dailyRisks.length ? `${dailyRisks.length} חריגים` : 'אין חריגים'}</span></div>
+        {dailyRisks.length > 0 && <div className="overflow-x-auto"><table className="w-full text-xs"><thead className="bg-slate-50"><tr><th className="p-3">תאריך</th><th className="p-3">עובד</th><th className="p-3">זמין</th><th className="p-3">משובץ</th><th className="p-3">חריגה</th><th className="p-3">משימות</th><th className="p-3">סיבה</th></tr></thead><tbody className="divide-y">{dailyRisks.map(r=><tr key={`${r.employeeId}-${r.date}`} className="bg-rose-50/30"><td className="p-3 font-mono">{r.date}</td><td className="p-3 font-bold">{r.employeeName}</td><td className="p-3">{r.availableHours} ש׳</td><td className="p-3">{r.scheduledHours} ש׳</td><td className="p-3 text-rose-700 font-bold">{r.overHours} ש׳</td><td className="p-3">{r.tasks.map(t=>`${t.taskNumber} (${t.hours}ש׳)`).join(', ')}</td><td className="p-3 text-rose-700">{r.reason}</td></tr>)}</tbody></table></div>}
       </div>
 
       {/* Monthly Capacity Override Modal */}

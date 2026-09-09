@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, Calendar, AlertTriangle, Plus, Trash2, Clock } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Task, Priority, TaskStatus, DelayReason } from '../../types';
+import { Task, Priority, TaskStatus, DelayReason, TaskRecurrence, RecurrenceMode, TaskDependency, DependencyType } from '../../types';
 import { getHebrewMonthName } from '../../services/capacityEngine';
+import { generateOccurrenceDates, recurrenceToMonthlyAllocations } from '../../services/recurrenceService';
+import { DependencyService } from '../../services/dependencyService';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -20,6 +22,9 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
     taskAllocations,
     selectedMonth,
     taskStatuses,
+    tasks,
+    auditLogs,
+    settings,
   } = useApp();
 
   const [name, setName] = useState('');
@@ -39,6 +44,22 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
   const [isBillable, setIsBillable] = useState(true);
   const [delayReason, setDelayReason] = useState<DelayReason | ''>('');
   const [notes, setNotes] = useState('');
+  const [source, setSource] = useState<Task['source']>('לקוח');
+  const [dateChangeReason, setDateChangeReason] = useState('');
+  const [recurrenceMode, setRecurrenceMode] = useState<RecurrenceMode>('none');
+  const [recurrenceHours, setRecurrenceHours] = useState<number>(1);
+  const [recurrenceDayOfMonth, setRecurrenceDayOfMonth] = useState<number>(1);
+  const [recurrenceDayOfWeek, setRecurrenceDayOfWeek] = useState<number>(2);
+  const [recurrenceWeekOfMonth, setRecurrenceWeekOfMonth] = useState<number>(1);
+  const [specificDatesText, setSpecificDatesText] = useState('');
+  const [newComment, setNewComment] = useState('');
+  const [planningStatus, setPlanningStatus] = useState<'draft' | 'approved'>('approved');
+  const [isMilestone, setIsMilestone] = useState(false);
+  const [dependenciesDraft, setDependenciesDraft] = useState<TaskDependency[]>([]);
+  const [dependencyPredecessorId, setDependencyPredecessorId] = useState('');
+  const [dependencyType, setDependencyType] = useState<DependencyType>('FS');
+  const [dependencyLagDays, setDependencyLagDays] = useState<number>(0);
+  const [exceptionDatesText, setExceptionDatesText] = useState('');
 
   // Multi-month allocations for this task (Section 8: TaskAllocation)
   const [monthlyAllocations, setMonthlyAllocations] = useState<{ month: string; hours: number }[]>([]);
@@ -63,6 +84,20 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
       setIsBillable(taskToEdit.isBillable);
       setDelayReason(taskToEdit.delayReason || '');
       setNotes(taskToEdit.notes || '');
+      setSource(taskToEdit.source || 'לקוח');
+      setDateChangeReason(taskToEdit.dateChangeReason || '');
+      setRecurrenceMode(taskToEdit.recurrence?.mode || 'none');
+      setRecurrenceHours(taskToEdit.recurrence?.hoursPerOccurrence || 1);
+      setRecurrenceDayOfMonth(taskToEdit.recurrence?.dayOfMonth || 1);
+      setRecurrenceDayOfWeek(taskToEdit.recurrence?.dayOfWeek ?? 2);
+      setRecurrenceWeekOfMonth(taskToEdit.recurrence?.weekOfMonth || 1);
+      setSpecificDatesText((taskToEdit.recurrence?.specificDates || []).join('\n'));
+      setNewComment('');
+      setPlanningStatus(taskToEdit.planningStatus || 'approved');
+      setIsMilestone(!!taskToEdit.isMilestone);
+      setDependenciesDraft(taskToEdit.dependencies?.length ? taskToEdit.dependencies : (taskToEdit.dependencyIds || []).map((id, index) => ({ id: `legacy-edit-${index}-${id}`, predecessorTaskId: id, successorTaskId: taskToEdit.id, type: 'FS', lagDays: 0, createdAt: taskToEdit.createdAt })));
+      setDependencyPredecessorId(''); setDependencyType('FS'); setDependencyLagDays(0);
+      setExceptionDatesText((taskToEdit.recurrence?.exceptionDates || []).join('\n'));
 
       // Load existing allocations for this task
       const existingAlloc = taskAllocations.filter((a) => a.taskId === taskToEdit.id);
@@ -99,6 +134,18 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
       setIsBillable(true);
       setDelayReason('');
       setNotes('');
+      setSource('לקוח');
+      setDateChangeReason('');
+      setRecurrenceMode('none');
+      setRecurrenceHours(1);
+      setRecurrenceDayOfMonth(1);
+      setRecurrenceDayOfWeek(2);
+      setRecurrenceWeekOfMonth(1);
+      setSpecificDatesText('');
+      setNewComment('');
+      setPlanningStatus('approved');
+      setDependenciesDraft([]); setDependencyPredecessorId(''); setDependencyType('FS'); setDependencyLagDays(0);
+      setExceptionDatesText('');
       setMonthlyAllocations([{ month: todayStr.substring(0, 7), hours: 36 }]);
     }
     setFormError(null);
@@ -148,7 +195,22 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
     );
   };
 
-  const totalAllocated = monthlyAllocations.reduce((a, b) => a + b.hours, 0);
+  const recurrence: TaskRecurrence | undefined = recurrenceMode === 'none' ? undefined : {
+    mode: recurrenceMode,
+    hoursPerOccurrence: Math.max(0, recurrenceHours),
+    startDate: plannedStartDate,
+    endDate: plannedEndDate,
+    dayOfMonth: recurrenceDayOfMonth,
+    dayOfWeek: recurrenceDayOfWeek,
+    weekOfMonth: recurrenceWeekOfMonth,
+    specificDates: recurrenceMode === 'specific_dates'
+      ? specificDatesText.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean)
+      : undefined,
+    exceptionDates: exceptionDatesText.split(/[\n,;]+/).map((x) => x.trim()).filter(Boolean),
+  };
+  const recurrenceDates = generateOccurrenceDates(recurrence);
+  const effectiveAllocations = recurrence ? recurrenceToMonthlyAllocations(recurrence) : monthlyAllocations;
+  const totalAllocated = effectiveAllocations.reduce((a, b) => a + b.hours, 0);
 
   // Form Validation (Section 36)
   const handleSubmit = (e: React.FormEvent) => {
@@ -169,6 +231,36 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
       setFormError('תאריך סיום אינו יכול להיות מוקדם מתאריך ההתחלה');
       return;
     }
+    if (deadline < plannedEndDate) {
+      setFormError('הדדליין אינו יכול להיות מוקדם מתאריך הסיום המתוכנן');
+      return;
+    }
+    const selectedClient = clients.find((c) => c.id === clientId);
+    if (selectedClient?.isActive === false) {
+      setFormError('לא ניתן לשייך משימה חדשה ללקוח שאינו פעיל');
+      return;
+    }
+    if (selectedAssignee?.isActive === false) {
+      setFormError('לא ניתן לשייך משימה לעובד שאינו פעיל');
+      return;
+    }
+    if ((settings.closedMonths || []).includes(plannedStartDate.substring(0, 7))) {
+      setFormError('החודש של תאריך תחילת המשימה סגור לשינויים. יש לפתוח אותו מחדש בהגדרות לפני שמירה.');
+      return;
+    }
+    if (dependenciesDraft.some((d) => d.predecessorTaskId === taskToEdit?.id)) {
+      setIsMilestone(false);
+      setFormError('משימה אינה יכולה להיות תלויה בעצמה');
+      return;
+    }
+    if (taskToEdit && dependenciesDraft.some((d) => DependencyService.wouldCreateCycle(tasks, { predecessorTaskId: d.predecessorTaskId, successorTaskId: taskToEdit.id, type: d.type, lagDays: d.lagDays }))) {
+      setFormError('אחת התלויות יוצרת Dependency מעגלי. יש להסיר אותה לפני שמירה.');
+      return;
+    }
+    if (recurrence && recurrenceDates.length === 0) {
+      setFormError('הוגדרה משימה שוטפת אך לא נוצר אף מועד ביצוע בטווח שנבחר');
+      return;
+    }
     if (estimatedHours < 0 || actualHours < 0 || remainingHours < 0) {
       setFormError('שעות עבודה אינן יכולות להיות שליליות');
       return;
@@ -182,7 +274,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
       assigneeId,
       priority,
       plannedStartDate,
-      plannedEndDate,
+      plannedEndDate: isMilestone ? plannedStartDate : plannedEndDate,
       deadline,
       estimatedHours,
       actualHours,
@@ -191,13 +283,26 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
       status,
       isBillable,
       delayReason: delayReason ? (delayReason as DelayReason) : undefined,
+      source,
+      planningStatus,
+      isMilestone,
+      dependencyIds: dependenciesDraft.map((d) => d.predecessorTaskId),
+      dependencies: dependenciesDraft.map((d) => ({ ...d, successorTaskId: taskToEdit?.id || 'pending' })),
+      recurrence,
+      baselinePlannedStartDate: taskToEdit?.baselinePlannedStartDate || plannedStartDate,
+      baselinePlannedEndDate: taskToEdit?.baselinePlannedEndDate || plannedEndDate,
+      baselineEstimatedHours: taskToEdit?.baselineEstimatedHours ?? estimatedHours,
+      dateChangeReason: taskToEdit && (taskToEdit.plannedStartDate !== plannedStartDate || taskToEdit.plannedEndDate !== plannedEndDate || taskToEdit.deadline !== deadline) ? dateChangeReason : taskToEdit?.dateChangeReason,
+      comments: newComment.trim()
+        ? [...(taskToEdit?.comments || []), { id: `c-${Date.now()}`, taskId: taskToEdit?.id || 'pending', text: newComment.trim(), createdAt: new Date().toISOString(), createdBy: 'משתמש מקומי' }]
+        : (taskToEdit?.comments || []),
       notes,
     };
 
     if (taskToEdit) {
-      updateTask({ ...taskToEdit, ...payload }, monthlyAllocations);
+      updateTask({ ...taskToEdit, ...payload }, effectiveAllocations);
     } else {
-      addTask(payload, monthlyAllocations);
+      addTask(payload, effectiveAllocations);
     }
 
     onClose();
@@ -471,8 +576,52 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
             </div>
           </div>
 
+
+          {/* Recurring / continuous task scheduling */}
+          <div className="border border-indigo-200 bg-indigo-50/40 p-3.5 rounded-xl space-y-3">
+            <div>
+              <span className="font-bold text-xs text-indigo-900">משימה שוטפת / מתמשכת</span>
+              <p className="text-[11px] text-indigo-700">שיבוץ שעות לימים אמיתיים במקום חלוקה חודשית כללית בלבד.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div><label className="block text-[11px] font-semibold mb-1">סוג תדירות</label><select value={recurrenceMode} onChange={(e)=>setRecurrenceMode(e.target.value as RecurrenceMode)} className="w-full text-xs border rounded-lg p-2 bg-white"><option value="none">ללא – משימה רגילה</option><option value="specific_dates">תאריכים ספציפיים בלבד</option><option value="monthly_day">יום קבוע בחודש</option><option value="monthly_weekday">יום בשבוע בתוך החודש</option><option value="weekly">כל שבוע ביום קבוע</option></select></div>
+              {recurrenceMode !== 'none' && <div><label className="block text-[11px] font-semibold mb-1">שעות בכל מופע</label><input type="number" min="0" step="0.25" value={recurrenceHours} onChange={(e)=>setRecurrenceHours(Number(e.target.value)||0)} className="w-full text-xs border rounded-lg p-2 bg-white"/></div>}
+              {recurrenceMode === 'monthly_day' && <div><label className="block text-[11px] font-semibold mb-1">יום בחודש</label><input type="number" min="1" max="31" value={recurrenceDayOfMonth} onChange={(e)=>setRecurrenceDayOfMonth(Math.min(31,Math.max(1,Number(e.target.value)||1)))} className="w-full text-xs border rounded-lg p-2 bg-white"/></div>}
+              {(recurrenceMode === 'weekly' || recurrenceMode === 'monthly_weekday') && <div><label className="block text-[11px] font-semibold mb-1">יום בשבוע</label><select value={recurrenceDayOfWeek} onChange={(e)=>setRecurrenceDayOfWeek(Number(e.target.value))} className="w-full text-xs border rounded-lg p-2 bg-white"><option value={0}>ראשון</option><option value={1}>שני</option><option value={2}>שלישי</option><option value={3}>רביעי</option><option value={4}>חמישי</option><option value={5}>שישי</option><option value={6}>שבת</option></select></div>}
+              {recurrenceMode === 'monthly_weekday' && <div><label className="block text-[11px] font-semibold mb-1">איזה שבוע בחודש</label><select value={recurrenceWeekOfMonth} onChange={(e)=>setRecurrenceWeekOfMonth(Number(e.target.value))} className="w-full text-xs border rounded-lg p-2 bg-white"><option value={1}>ראשון</option><option value={2}>שני</option><option value={3}>שלישי</option><option value={4}>רביעי</option><option value={5}>חמישי</option></select></div>}
+            </div>
+            {recurrenceMode === 'specific_dates' && <div><label className="block text-[11px] font-semibold mb-1">תאריכים ספציפיים – תאריך בכל שורה</label><textarea rows={4} value={specificDatesText} onChange={(e)=>setSpecificDatesText(e.target.value)} placeholder={'2026-09-15\n2026-10-13\n2026-11-17'} className="w-full text-xs border rounded-lg p-2 bg-white font-mono"/></div>}
+            {recurrence && <div className="text-[11px] bg-white border rounded-lg p-2">נוצרו <strong>{recurrenceDates.length}</strong> מופעים, סה״כ <strong>{totalAllocated}</strong> שעות. {recurrenceDates.length > 0 && <>מועד ראשון: {recurrenceDates[0]} | אחרון: {recurrenceDates[recurrenceDates.length-1]}</>}</div>}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><label className="block text-xs font-semibold text-slate-700 mb-1">מקור משימה</label><select value={source || 'לקוח'} onChange={(e)=>setSource(e.target.value as Task['source'])} className="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg p-2"><option>לקוח</option><option>פנימי</option><option>רגולציה</option><option>תקלה</option><option>פיתוח</option><option>תמיכה</option><option>אחר</option></select></div>
+            {taskToEdit && (taskToEdit.plannedStartDate !== plannedStartDate || taskToEdit.plannedEndDate !== plannedEndDate || taskToEdit.deadline !== deadline) && <div><label className="block text-xs font-semibold text-slate-700 mb-1">סיבת שינוי תאריך</label><input value={dateChangeReason} onChange={(e)=>setDateChangeReason(e.target.value)} required className="w-full text-xs bg-amber-50 border border-amber-300 rounded-lg p-2" placeholder="לדוגמה: המתנה לאפיון / שינוי עדיפות"/></div>}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div><label className="block text-xs font-semibold text-slate-700 mb-1">מצב תכנון</label><select value={planningStatus} onChange={(e)=>setPlanningStatus(e.target.value as 'draft'|'approved')} className="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg p-2"><option value="approved">מאושר – משפיע על הקיבולת</option><option value="draft">טיוטה – לא משפיע על הקיבולת</option></select></div>
+            <label className="flex items-center gap-2 p-2 border border-slate-200 rounded-lg bg-slate-50 text-xs font-semibold text-slate-700"><input type="checkbox" checked={isMilestone} onChange={(e)=>setIsMilestone(e.target.checked)} /> Milestone – נקודת ציון בפרויקט</label>
+            <div className="sm:col-span-2 border border-violet-200 bg-violet-50/40 rounded-xl p-3 space-y-2">
+              <div><label className="block text-xs font-bold text-violet-900">Dependencies – תלויות בין משימות</label><p className="text-[11px] text-violet-700">ניתן להגדיר מספר משימות קודמות, סוג תלות ו-Lag. המערכת מונעת תלות מעגלית.</p></div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <select value={dependencyPredecessorId} onChange={(e)=>setDependencyPredecessorId(e.target.value)} className="sm:col-span-2 w-full text-xs bg-white border border-slate-300 rounded-lg p-2"><option value="">בחר משימה קודמת</option>{tasks.filter(t=>t.id!==taskToEdit?.id && !dependenciesDraft.some(d=>d.predecessorTaskId===t.id)).map(t=><option key={t.id} value={t.id}>{t.taskNumber} – {t.name}</option>)}</select>
+                <select value={dependencyType} onChange={(e)=>setDependencyType(e.target.value as DependencyType)} className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2"><option value="FS">Finish → Start</option><option value="SS">Start → Start</option><option value="FF">Finish → Finish</option><option value="SF">Start → Finish</option></select>
+                <div className="flex gap-1"><input type="number" value={dependencyLagDays} onChange={(e)=>setDependencyLagDays(Number(e.target.value)||0)} className="min-w-0 w-full text-xs bg-white border border-slate-300 rounded-lg p-2" title="Lag בימים"/><button type="button" onClick={()=>{ if(!dependencyPredecessorId) return; const successorId=taskToEdit?.id || 'pending'; const candidate={ predecessorTaskId: dependencyPredecessorId, successorTaskId: successorId, type: dependencyType, lagDays: dependencyLagDays }; if(taskToEdit && DependencyService.wouldCreateCycle(tasks,candidate)){ setFormError('התלות שנבחרה יוצרת מעגל ואינה ניתנת להוספה'); return; } setDependenciesDraft(prev=>[...prev,{ id:`dep-${Date.now()}`, ...candidate, createdAt:new Date().toISOString(), createdBy:'משתמש מקומי' }]); setDependencyPredecessorId(''); setDependencyLagDays(0); setFormError(null); }} className="px-3 rounded-lg bg-violet-600 text-white text-xs font-bold">הוסף</button></div>
+              </div>
+              <div className="space-y-1">{dependenciesDraft.map((d)=><div key={d.id} className="flex items-center justify-between bg-white border rounded-lg px-2 py-1.5 text-[11px]"><span>{tasks.find(t=>t.id===d.predecessorTaskId)?.taskNumber || d.predecessorTaskId} · {d.type} · Lag {d.lagDays} ימים</span><button type="button" onClick={()=>setDependenciesDraft(prev=>prev.filter(x=>x.id!==d.id))} className="text-rose-600">הסר</button></div>)}{!dependenciesDraft.length && <div className="text-[11px] text-slate-500">ללא Dependencies</div>}</div>
+            </div>
+          </div>
+
+          {recurrenceMode !== 'none' && <div><label className="block text-[11px] font-semibold mb-1">חריגים בסדרה – תאריכים שלא לבצע בהם</label><textarea rows={2} value={exceptionDatesText} onChange={(e)=>setExceptionDatesText(e.target.value)} placeholder={'2026-10-13\n2026-12-22'} className="w-full text-xs border rounded-lg p-2 bg-white font-mono"/></div>}
+
+          {taskToEdit && <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/60 text-xs space-y-2">
+            <div className="font-bold">Baseline מול מצב נוכחי</div>
+            <div className="grid grid-cols-3 gap-2 text-center"><div className="bg-white border rounded p-2"><div className="text-[10px] text-slate-500">תחילת תכנון מקורית</div><strong>{taskToEdit.baselinePlannedStartDate || taskToEdit.plannedStartDate}</strong><div className="text-[10px] text-slate-400">כעת: {plannedStartDate}</div></div><div className="bg-white border rounded p-2"><div className="text-[10px] text-slate-500">סיום מקורי</div><strong>{taskToEdit.baselinePlannedEndDate || taskToEdit.plannedEndDate}</strong><div className="text-[10px] text-slate-400">כעת: {plannedEndDate}</div></div><div className="bg-white border rounded p-2"><div className="text-[10px] text-slate-500">שעות מקוריות</div><strong>{taskToEdit.baselineEstimatedHours ?? taskToEdit.estimatedHours}</strong><div className="text-[10px] text-slate-400">כעת: {estimatedHours}</div></div></div>
+          </div>}
+
           {/* Section 8: Multi-Month Task Allocation (פריסת שעות לחודשים) */}
-          <div className="border border-blue-200 bg-blue-50/40 p-3.5 rounded-xl space-y-2.5">
+          {recurrenceMode === 'none' && <div className="border border-blue-200 bg-blue-50/40 p-3.5 rounded-xl space-y-2.5">
             <div className="flex items-center justify-between">
               <div>
                 <span className="font-bold text-xs text-blue-900 flex items-center gap-1.5">
@@ -537,17 +686,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({ isOpen, onClose, taskToEdi
             </div>
           </div>
 
-          {/* Description & Notes */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">תיאור והערות</label>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="פרטים נוספים, דרישות אפיון או הנחיות עבודה..."
-              className="w-full text-xs bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-800 focus:bg-white"
-            />
+          }
+
+          {/* Comments history */}
+          <div className="border border-slate-200 rounded-xl p-3 space-y-2">
+            <div><span className="font-bold text-xs">הערות / תגובות למשימה</span><p className="text-[11px] text-slate-500">כל הערה נשמרת בנפרד עם תאריך ושעה ואינה דורסת הערות קודמות.</p></div>
+            {taskToEdit?.notes && !(taskToEdit.comments?.length) && <div className="text-[11px] bg-amber-50 border border-amber-200 rounded p-2"><strong>הערה היסטורית:</strong> {taskToEdit.notes}</div>}
+            {taskToEdit?.comments?.length ? <div className="max-h-32 overflow-y-auto space-y-1">{[...taskToEdit.comments].reverse().map(c=><div key={c.id} className="bg-slate-50 border rounded p-2 text-[11px]"><div>{c.text}</div><div className="text-[10px] text-slate-400 mt-1">{new Date(c.createdAt).toLocaleString('he-IL')} · {c.createdBy}</div></div>)}</div> : null}
+            <textarea rows={2} value={newComment} onChange={(e)=>setNewComment(e.target.value)} placeholder="הוסף הערה חדשה..." className="w-full text-xs bg-white border border-slate-300 rounded-lg p-2"/>
           </div>
+
+          {taskToEdit && <div className="border border-slate-200 rounded-xl p-3 space-y-2"><div className="font-bold text-xs">היסטוריית שינויים במשימה</div><div className="max-h-32 overflow-y-auto space-y-1">{auditLogs.filter(l=>l.entityType==='Task' && l.entityId===taskToEdit.id).slice(0,20).map(l=><div key={l.id} className="text-[11px] bg-slate-50 border rounded p-2"><strong>{new Date(l.timestamp).toLocaleString('he-IL')}</strong> · {l.user} · {l.action}<div className="text-slate-500">{l.details || `${l.fieldName}: ${String(l.oldValue ?? '—')} → ${String(l.newValue ?? '—')}`}</div></div>)}{auditLogs.filter(l=>l.entityType==='Task' && l.entityId===taskToEdit.id).length===0 && <div className="text-[11px] text-slate-400">אין עדיין אירועי Audit למשימה זו.</div>}</div></div>}
 
           {/* Actions */}
           <div className="pt-3 border-t border-slate-100 flex items-center justify-between">

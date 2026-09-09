@@ -20,6 +20,7 @@ import {
   UserCheck,
   ListOrdered,
   History,
+  BrainCircuit,
 } from 'lucide-react';
 import { useApp, ActiveTab } from '../context/AppContext';
 
@@ -51,6 +52,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, setIsCollapsed })
       id: 'dashboard',
       label: 'דשבורד ראשי',
       icon: <LayoutDashboard className="w-5 h-5" />,
+    },
+    {
+      id: 'planningIntelligence',
+      label: 'מרכז תכנון חכם',
+      icon: <BrainCircuit className="w-5 h-5" />,
+      badge: unreadNotificationsCount > 0 ? 'דורש טיפול' : undefined,
+      badgeColor: 'bg-indigo-100 text-indigo-800 border border-indigo-300',
     },
     {
       id: 'capacity',

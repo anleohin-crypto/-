@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell } from 'electron';
+import { app, BrowserWindow, session, shell, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,7 +22,8 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      webSecurity: true
+      webSecurity: true,
+      preload: path.join(__dirname, 'preload.mjs')
     }
   });
 
@@ -45,6 +46,13 @@ function createWindow() {
     void win.loadURL('http://127.0.0.1:3000');
   }
 }
+
+ipcMain.handle('app:get-version', () => app.getVersion());
+ipcMain.handle('app:open-data-folder', async () => {
+  const folder = app.getPath('userData');
+  const err = await shell.openPath(folder);
+  return { folder, error: err || null };
+});
 
 app.whenReady().then(() => {
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {

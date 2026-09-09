@@ -28,6 +28,7 @@ import { isTaskClosed } from '../services/taskStatusHelper';
 
 export type ActiveTab =
   | 'dashboard'
+  | 'planningIntelligence'
   | 'capacity'
   | 'tasks'
   | 'gantt'
@@ -47,7 +48,7 @@ export type ActiveTab =
 
 export interface DrilldownState {
   isOpen: boolean;
-  type: 'free_hours' | 'over_allocation' | 'overdue' | 'at_risk' | 'billable' | 'all_open' | 'employee';
+  type: 'free_hours' | 'over_allocation' | 'overdue' | 'at_risk' | 'billable' | 'non_billable' | 'allocated' | 'actual' | 'idle' | 'absences' | 'all_open' | 'employee';
   title: string;
   employeeId?: string;
   data?: any;
@@ -113,7 +114,7 @@ interface AppContextType {
   // Actions / Mutators
   // Tasks
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'taskNumber'>, allocations?: { month: string; hours: number }[]) => void;
-  updateTask: (task: Task, allocations?: { month: string; hours: number }[]) => void;
+  updateTask: (task: Task, allocations?: { month: string; hours: number; allocationDate?: string; source?: TaskAllocation['source']; notes?: string }[]) => void;
   updateTaskStatus: (taskId: string, newStatus: TaskStatus, delayReason?: DelayReason) => void;
   batchUpdateTaskStatus: (taskIds: string[], newStatus: TaskStatus) => void;
   deleteTask: (taskId: string) => void;
@@ -163,6 +164,8 @@ interface AppContextType {
   markNotificationRead: (id: string) => void;
   markAllNotificationsRead: () => void;
   dismissNotification: (id: string) => void;
+  clearAllNotifications: () => void;
+  restoreDismissedNotifications: () => void;
 
   // Settings & DB
   updateSettings: (newSettings: Partial<AppSettings>) => void;
@@ -216,6 +219,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
+
+  // Automatic local snapshot: once per day, before the user starts making changes.
+  useEffect(() => { StorageService.createInternalSnapshot('daily-auto'); }, []);
 
   // Real-time synchronization across browser tabs and windows
   useEffect(() => {
@@ -362,10 +368,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setDrilldown((prev) => ({ ...prev, isOpen: false }));
   };
 
+  const auditDiff = (action: string, entityType: string, entityId: string, entityLabel: string, before: Record<string, any>, after: Record<string, any>) => {
+    const ignored = new Set(['id', 'createdAt', 'updatedAt', 'avatarColor']);
+    const keys = [...new Set([...Object.keys(before || {}), ...Object.keys(after || {})])].filter(k => !ignored.has(k));
+    const changes = keys.filter(k => JSON.stringify(before?.[k] ?? null) !== JSON.stringify(after?.[k] ?? null)).map(k => ({
+      fieldName: k, oldValue: before?.[k] ?? null, newValue: after?.[k] ?? null
+    }));
+    if (!changes.length) return;
+    StorageService.logAudit({
+      user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת',
+      action, entityType, entityId, entityLabel, fieldName: changes.length === 1 ? changes[0].fieldName : 'multiple',
+      oldValue: changes.length === 1 ? String(changes[0].oldValue ?? '') : `${changes.length} שדות`,
+      newValue: changes.length === 1 ? String(changes[0].newValue ?? '') : `${changes.length} שדות`,
+      details: `שונו ${changes.length} שדות: ${changes.map(c => c.fieldName).join(', ')}`,
+      changes, source: 'ui',
+    });
+  };
+
   // Mutator functions
   const addTask = (
     taskData: Omit<Task, 'id' | 'createdAt' | 'taskNumber'>,
-    allocations?: { month: string; hours: number }[]
+    allocations?: { month: string; hours: number; allocationDate?: string; source?: TaskAllocation['source']; notes?: string }[]
   ) => {
     const newId = 'tsk-' + Date.now();
     const taskNum = `TSK-${Math.floor(100 + tasks.length + 1)}`;
@@ -374,6 +397,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       id: newId,
       taskNumber: taskNum,
       createdAt: new Date().toISOString().substring(0, 10),
+      dependencies: (taskData.dependencies || []).map((d) => ({ ...d, successorTaskId: newId })),
     };
 
     setTasks((prev) => [newTask, ...prev]);
@@ -418,7 +442,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const updateTask = (
     updatedTask: Task,
-    allocations?: { month: string; hours: number }[]
+    allocations?: { month: string; hours: number; allocationDate?: string; source?: TaskAllocation['source']; notes?: string }[]
   ) => {
     const oldTask = tasks.find((t) => t.id === updatedTask.id);
     setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
@@ -433,6 +457,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           employeeId: updatedTask.assigneeId,
           month: a.month,
           allocatedHours: a.hours,
+          allocationDate: a.allocationDate,
+          source: a.source || 'manual',
+          notes: a.notes,
         }));
         return [...filtered, ...added];
       });
@@ -475,6 +502,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       }
     }
 
+    if (oldTask) auditDiff('עדכון משימה', 'Task', updatedTask.id, `${updatedTask.taskNumber} – ${updatedTask.name}`, oldTask as any, updatedTask as any);
     addToast(`משימה ${updatedTask.taskNumber} עודכנה בהצלחה`);
   };
 
@@ -606,11 +634,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       avatarColor: colors[employees.length % colors.length],
     };
     setEmployees((prev) => [...prev, newEmp]);
+    StorageService.logAudit({ user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת', action:'יצירת עובד', entityType:'Employee', entityId:newId, entityLabel:newEmp.name, fieldName:'all', oldValue:null, newValue:newEmp.name, details:`נוצר עובד חדש: ${newEmp.name}`, source:'ui' });
     addToast(`העובד/ת ${newEmp.name} נוסף/ה בהצלחה`);
   };
 
   const updateEmployee = (emp: Employee) => {
+    const oldEmp = employees.find((e) => e.id === emp.id);
     setEmployees((prev) => prev.map((e) => (e.id === emp.id ? emp : e)));
+    if (oldEmp) auditDiff('עדכון עובד', 'Employee', emp.id, emp.name, oldEmp as any, emp as any);
     addToast(`פרטי העובד/ת ${emp.name} עודכנו בהצלחה`);
   };
 
@@ -631,11 +662,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newId = 'cli-' + Date.now();
     const newClient: Client = { ...clientData, id: newId };
     setClients((prev) => [...prev, newClient]);
+    StorageService.logAudit({ user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת', action:'יצירת לקוח', entityType:'Client', entityId:newId, entityLabel:newClient.name, fieldName:'all', oldValue:null, newValue:newClient.name, details:`נוצר לקוח חדש: ${newClient.name} (${newClient.code})`, source:'ui' });
     addToast(`הלקוח ${newClient.name} נוסף בהצלחה`);
   };
 
   const updateClient = (client: Client) => {
+    const oldClient = clients.find((c) => c.id === client.id);
     setClients((prev) => prev.map((c) => (c.id === client.id ? client : c)));
+    if (oldClient) auditDiff('עדכון לקוח', 'Client', client.id, client.name, oldClient as any, client as any);
     addToast(`פרטי הלקוח ${client.name} עודכנו`);
   };
 
@@ -670,6 +704,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
 
     setAbsences((prev) => [...prev, newAbsence]);
+    StorageService.logAudit({ user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת', action:'יצירת היעדרות', entityType:'Absence', entityId:newId, entityLabel:`${emp?.name || newAbsence.employeeId} – ${newAbsence.type}`, fieldName:'all', oldValue:null, newValue:`${newAbsence.startDate} עד ${newAbsence.endDate}`, details:`${newAbsence.hours} שעות, ${newAbsence.isPlanned ? 'מתוכנן' : 'לא מתוכנן'}`, source:'ui' });
     addToast(`היעדרות נרשמה עבור ${emp?.name || ''}`);
 
     if (hasConflict && warningMsg) {
@@ -693,7 +728,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const deleteAbsence = (absenceId: string) => {
+    const old = absences.find(a => a.id === absenceId);
     setAbsences((prev) => prev.filter((a) => a.id !== absenceId));
+    if (old) StorageService.logAudit({ user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת', action:'מחיקת היעדרות', entityType:'Absence', entityId:absenceId, entityLabel:`${old.type} ${old.startDate}-${old.endDate}`, fieldName:'deleted', oldValue:old.type, newValue:null, details:`נמחקה היעדרות של ${old.hours} שעות`, source:'ui' });
     addToast('ההיעדרות הוסרה', 'info');
   };
 
@@ -845,7 +882,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const dismissNotification = (id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, dismissed: true, isRead: true } : n));
+  };
+
+  const clearAllNotifications = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, dismissed: true, isRead: true })));
+    StorageService.logAudit({
+      user: settings.activeUserName || currentUser?.fullName || 'מנהל מערכת',
+      action: 'ניקוי מרכז ההתראות',
+      entityType: 'Notification',
+      entityId: 'all',
+      fieldName: 'dismissed',
+      oldValue: notifications.filter((n) => !n.dismissed).length,
+      newValue: 0,
+      details: 'כל ההתראות הפעילות הוסתרו. התראות אוטומטיות בעלות אותו מזהה לא ייווצרו מחדש.',
+      source: 'ui',
+    });
+    addToast('כל ההתראות נוקו');
+  };
+
+  const restoreDismissedNotifications = () => {
+    const count = notifications.filter((n) => n.dismissed).length;
+    setNotifications((prev) => prev.map((n) => n.dismissed ? { ...n, dismissed: false } : n));
+    if (count) addToast(`שוחזרו ${count} התראות שנוקו`); else addToast('אין התראות שנוקו לשחזור', 'info');
   };
 
   const updateSettings = (newSettings: Partial<AppSettings>) => {
@@ -1368,6 +1427,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         markNotificationRead,
         markAllNotificationsRead,
         dismissNotification,
+        clearAllNotifications,
+        restoreDismissedNotifications,
         updateSettings,
         resetDatabase,
         importTasksBatch,

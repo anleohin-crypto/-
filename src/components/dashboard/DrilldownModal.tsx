@@ -8,7 +8,7 @@ interface DrilldownModalProps {
 }
 
 export const DrilldownModal: React.FC<DrilldownModalProps> = ({ onSelectTask }) => {
-  const { drilldown, closeDrilldown, teamMetrics, employees, clients, tasks, setCurrentTab } = useApp();
+  const { drilldown, closeDrilldown, teamMetrics, employees, clients, tasks, absences, selectedMonth, filterEmployeeId, filterClientId, filterProjectId, setCurrentTab } = useApp();
 
   if (!drilldown.isOpen) return null;
 
@@ -35,6 +35,11 @@ export const DrilldownModal: React.FC<DrilldownModalProps> = ({ onSelectTask }) 
               {drilldown.type === 'overdue' && <AlertTriangle className="w-5 h-5 text-rose-600" />}
               {drilldown.type === 'at_risk' && <AlertTriangle className="w-5 h-5 text-amber-600" />}
               {drilldown.type === 'billable' && <CheckCircle2 className="w-5 h-5 text-emerald-600" />}
+              {drilldown.type === 'non_billable' && <Clock className="w-5 h-5 text-slate-600" />}
+              {drilldown.type === 'allocated' && <Clock className="w-5 h-5 text-indigo-600" />}
+              {drilldown.type === 'actual' && <Clock className="w-5 h-5 text-cyan-600" />}
+              {drilldown.type === 'idle' && <AlertTriangle className="w-5 h-5 text-amber-600" />}
+              {drilldown.type === 'absences' && <Clock className="w-5 h-5 text-rose-600" />}
               {drilldown.type === 'all_open' && <CheckCircle2 className="w-5 h-5 text-blue-600" />}
             </div>
             <div>
@@ -149,6 +154,40 @@ export const DrilldownModal: React.FC<DrilldownModalProps> = ({ onSelectTask }) 
               </div>
             </div>
           )}
+
+          {drilldown.type === 'allocated' && (
+            <div className="space-y-3">
+              <div className="text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 p-3 rounded-xl">סה״כ {teamMetrics.totalAllocatedHours} שעות משובצות. הפירוט מציג את מקור העומס אצל כל עובד.</div>
+              {teamMetrics.employeeMetrics.map((em) => <div key={em.employeeId} className="border border-slate-200 rounded-xl p-3 bg-white"><div className="flex justify-between text-sm font-semibold"><span>{em.employeeName}</span><span>{em.totalAllocatedHours} / {em.netCapacity} ש׳</span></div><div className="text-xs text-slate-500 mt-1">משימות: {em.taskAllocatedHours} ש׳ · הקצאות קבועות: {em.fixedAllocationHours} ש׳ · ניצולת: {em.utilizationPercentage}%</div><div className="mt-2 flex flex-wrap gap-1">{em.contributingTasks.map(t => <button key={t.id} onClick={() => { closeDrilldown(); setCurrentTab('tasks'); onSelectTask?.(t); }} className="text-[11px] px-2 py-1 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-blue-700">{t.taskNumber} · {t.name}</button>)}</div></div>)}
+            </div>
+          )}
+
+          {drilldown.type === 'non_billable' && (
+            <div className="space-y-2">
+              <div className="text-xs text-slate-700 bg-slate-50 border border-slate-200 p-3 rounded-xl">סה״כ {teamMetrics.nonBillableHours} שעות Non-Billable בחודש המסונן.</div>
+              {teamMetrics.employeeMetrics.filter(em => em.nonBillableHours > 0).map(em => <div key={em.employeeId} className="flex items-center justify-between border border-slate-200 rounded-xl p-3"><div><div className="font-semibold text-sm">{em.employeeName}</div><div className="text-xs text-slate-500">{em.utilizationPercentage}% ניצולת</div></div><div className="font-bold text-slate-700">{em.nonBillableHours} ש׳</div></div>)}
+              {teamMetrics.employeeMetrics.every(em => em.nonBillableHours <= 0) && <div className="text-center py-8 text-slate-500">אין שעות Non-Billable בטווח המסונן.</div>}
+            </div>
+          )}
+
+          {drilldown.type === 'idle' && (
+            <div className="space-y-2">
+              <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-3 rounded-xl">שעות הסרק מחושבות לעובדים שמתחת לסף הניצולת. סה״כ צפוי: {teamMetrics.expectedIdleHours} שעות.</div>
+              {teamMetrics.employeeMetrics.filter(em => em.idleHours > 0).sort((a,b) => b.idleHours - a.idleHours).map(em => <div key={em.employeeId} className="flex items-center justify-between border border-amber-200 rounded-xl p-3 bg-amber-50/30"><div><div className="font-semibold text-sm">{em.employeeName}</div><div className="text-xs text-slate-500">קיבולת נטו {em.netCapacity} · שובץ {em.totalAllocatedHours} · ניצולת {em.utilizationPercentage}%</div></div><div className="font-bold text-amber-700">{em.idleHours} ש׳ סרק</div></div>)}
+            </div>
+          )}
+
+          {drilldown.type === 'actual' && (() => {
+            const monthStart = `${selectedMonth}-01`; const monthEnd = `${selectedMonth}-31`;
+            const rows = tasks.filter(t => (filterEmployeeId === 'all' || t.assigneeId === filterEmployeeId) && (filterClientId === 'all' || t.clientId === filterClientId) && (filterProjectId === 'all' || t.projectId === filterProjectId) && t.plannedStartDate <= monthEnd && t.plannedEndDate >= monthStart && (Number(t.actualHours) || 0) > 0).sort((a,b) => (b.actualHours || 0) - (a.actualHours || 0));
+            return <div className="space-y-2"><div className="text-xs text-cyan-900 bg-cyan-50 border border-cyan-200 p-3 rounded-xl">שעות בפועל הן הערך המצטבר שנרשם במשימות החופפות לחודש; כאשר יתווסף דיווח שעות יומי, ניתן יהיה להציג Actual חודשי מדויק לפי תאריך דיווח.</div>{rows.map(t => <button key={t.id} onClick={() => { closeDrilldown(); setCurrentTab('tasks'); onSelectTask?.(t); }} className="w-full text-right border border-slate-200 rounded-xl p-3 hover:border-cyan-400"><div className="flex justify-between"><span className="font-semibold text-sm">{t.taskNumber} · {t.name}</span><span className="font-bold text-cyan-700">{t.actualHours} ש׳</span></div><div className="text-xs text-slate-500 mt-1">אחראי: {getEmployeeName(t.assigneeId)} · לקוח: {getClientName(t.clientId)} · מתוכנן: {t.estimatedHours} ש׳</div></button>)}{rows.length === 0 && <div className="text-center py-8 text-slate-500">לא נמצאו שעות בפועל במשימות המסוננות.</div>}</div>;
+          })()}
+
+          {drilldown.type === 'absences' && (() => {
+            const monthStart = `${selectedMonth}-01`; const monthEnd = `${selectedMonth}-31`;
+            const rows = absences.filter(a => a.startDate <= monthEnd && a.endDate >= monthStart && (filterEmployeeId === 'all' || a.employeeId === filterEmployeeId));
+            return <div className="space-y-2"><div className="text-xs text-rose-900 bg-rose-50 border border-rose-200 p-3 rounded-xl">היעדרויות מפחיתות {teamMetrics.absenceHours} שעות מהקיבולת בחודש המסונן.</div>{rows.map(a => <div key={a.id} className="border border-rose-200 rounded-xl p-3 bg-white flex items-center justify-between"><div><div className="font-semibold text-sm">{getEmployeeName(a.employeeId)} · {a.type}</div><div className="text-xs text-slate-500">{a.startDate} → {a.endDate}{a.collectiveTitle ? ` · ${a.collectiveTitle}` : ''}</div></div><div className="font-bold text-rose-700">{a.hours} ש׳</div></div>)}{rows.length === 0 && <div className="text-center py-8 text-slate-500">אין היעדרויות בטווח המסונן.</div>}</div>;
+          })()}
 
           {/* Overdue Tasks Drilldown */}
           {drilldown.type === 'overdue' && (

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Users,
   Clock,
@@ -47,6 +47,14 @@ export const DashboardView: React.FC = () => {
     absences,
     monthlyCapacities,
     settings,
+    clients,
+    projects,
+    filterClientId,
+    setFilterClientId,
+    filterProjectId,
+    setFilterProjectId,
+    filterEmployeeId,
+    setFilterEmployeeId,
     setCurrentTab,
   } = useApp();
 
@@ -112,8 +120,26 @@ export const DashboardView: React.FC = () => {
     color: statusColors[status] || '#cbd5e1',
   }));
 
+  const dashboardTasks = tasks.filter((t) =>
+    (filterEmployeeId === 'all' || t.assigneeId === filterEmployeeId) &&
+    (filterClientId === 'all' || t.clientId === filterClientId) &&
+    (filterProjectId === 'all' || t.projectId === filterProjectId) &&
+    t.plannedStartDate <= `${selectedMonth}-31` && t.plannedEndDate >= `${selectedMonth}-01`
+  );
+  const dashboardActualHours = dashboardTasks.reduce((sum, t) => sum + (Number(t.actualHours) || 0), 0);
+
   return (
     <div id="dashboard-view" className="space-y-6 animate-in fade-in duration-200">
+      <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-xs flex flex-col xl:flex-row xl:items-center gap-3" dir="rtl">
+        <div className="font-bold text-sm text-slate-900 shrink-0">מיקוד Dashboard</div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 flex-1">
+          <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white" aria-label="חודש Dashboard" />
+          <select value={filterEmployeeId} onChange={(e) => setFilterEmployeeId(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white"><option value="all">כל העובדים</option>{employees.filter(e => e.isActive !== false).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
+          <select value={filterClientId} onChange={(e) => setFilterClientId(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white"><option value="all">כל הלקוחות</option>{clients.filter(c => c.isActive !== false).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          <select value={filterProjectId} onChange={(e) => setFilterProjectId(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2 text-xs bg-white"><option value="all">כל הפרויקטים</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        </div>
+        {(filterEmployeeId !== 'all' || filterClientId !== 'all' || filterProjectId !== 'all') && <button type="button" onClick={() => { setFilterEmployeeId('all'); setFilterClientId('all'); setFilterProjectId('all'); }} className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold hover:bg-slate-50">איפוס סינון</button>}
+      </div>
       {/* Risk & Over-Allocation Critical Banner (if any) */}
       {teamMetrics.overAllocationHours > 0 && (
         <div className="bg-rose-50 border-r-4 border-rose-600 p-4 rounded-xl shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -195,7 +221,7 @@ export const DashboardView: React.FC = () => {
         <div
           id="kpi-allocated-hours"
           className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-blue-300 transition-all cursor-pointer"
-          onClick={() => setCurrentTab('capacity')}
+          onClick={() => openDrilldown('allocated', 'שעות משובצות – פירוט')}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
             <span>שעות משובצות</span>
@@ -226,7 +252,8 @@ export const DashboardView: React.FC = () => {
         {/* Non-Billable Hours */}
         <div
           id="kpi-non-billable-hours"
-          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-slate-300 transition-all"
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-slate-400 transition-all cursor-pointer"
+          onClick={() => openDrilldown('non_billable', 'שעות Non-Billable – פירוט')}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
             <span>Non-Billable</span>
@@ -253,7 +280,8 @@ export const DashboardView: React.FC = () => {
         {/* Expected Idle Hours */}
         <div
           id="kpi-idle-hours"
-          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-amber-300 transition-all"
+          className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-amber-400 transition-all cursor-pointer"
+          onClick={() => openDrilldown('idle', 'שעות סרק צפויות – פירוט')}
         >
           <div className="flex items-center justify-between text-slate-500 text-xs mb-1">
             <span>שעות סרק צפויות</span>
@@ -343,6 +371,29 @@ export const DashboardView: React.FC = () => {
           </div>
           <div className="text-xl font-bold text-amber-600 font-mono">{teamMetrics.atRiskTasksCount}</div>
           <div className="text-[11px] text-amber-700 font-medium mt-0.5 underline">מעוכבות / דדליין קרוב ←</div>
+        </div>
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-indigo-300 transition-all cursor-pointer" onClick={() => openDrilldown('allocated', 'שעות מתוכננות – פירוט')}>
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1"><span>Planned Hours</span><Calendar className="w-3.5 h-3.5 text-indigo-500" /></div>
+          <div className="text-xl font-bold text-indigo-700 font-mono">{teamMetrics.taskHours} ש׳</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">הקצאות משימה בחודש המסונן</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-cyan-300 transition-all cursor-pointer" onClick={() => openDrilldown('actual', 'שעות בפועל – פירוט')}>
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1"><span>Actual Hours</span><BarChart className="w-3.5 h-3.5 text-cyan-600" /></div>
+          <div className="text-xl font-bold text-cyan-700 font-mono">{dashboardActualHours} ש׳</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">מצטבר במשימות החופפות לחודש</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-violet-300 transition-all cursor-pointer" onClick={() => openDrilldown('all_open', 'שעות שנותרו – משימות פתוחות')}>
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1"><span>Remaining Hours</span><Layers className="w-3.5 h-3.5 text-violet-500" /></div>
+          <div className="text-xl font-bold text-violet-700 font-mono">{teamMetrics.totalRemainingHours} ש׳</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">יתרת עבודה פתוחה</div>
+        </div>
+
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs hover:border-rose-300 transition-all cursor-pointer" onClick={() => openDrilldown('absences', 'השפעת היעדרויות – פירוט')}>
+          <div className="flex items-center justify-between text-slate-500 text-xs mb-1"><span>Absences</span><Calendar className="w-3.5 h-3.5 text-rose-500" /></div>
+          <div className="text-xl font-bold text-rose-700 font-mono">{teamMetrics.absenceHours} ש׳</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">הפחתה מהקיבולת בחודש</div>
         </div>
       </div>
 

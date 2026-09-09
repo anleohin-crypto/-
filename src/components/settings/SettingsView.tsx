@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Shield,
   History,
@@ -20,6 +20,7 @@ import { UserRole } from '../../types';
 import { WorkHoursAndStandardSettings } from './WorkHoursAndStandardSettings';
 import { ShortenedDaysManager } from './ShortenedDaysManager';
 import { MonthlyStandardsManager } from './MonthlyStandardsManager';
+import { MonthClosingPanel } from './MonthClosingPanel';
 
 export const SettingsView: React.FC = () => {
   const { settings, updateSettings, addToast, resetDatabase } = useApp();
@@ -36,6 +37,19 @@ export const SettingsView: React.FC = () => {
   const [activeRole, setActiveRole] = useState<UserRole>(settings.activeUserRole || 'Team Manager');
 
   const [auditLogs, setAuditLogs] = useState(() => StorageService.getAuditLogs());
+  const [appVersion, setAppVersion] = useState('1.1.0');
+  const [dataFolder, setDataFolder] = useState('');
+
+  useEffect(() => {
+    window.desktopApi?.getVersion().then(setAppVersion).catch(() => undefined);
+  }, []);
+
+  const openDataFolder = async () => {
+    if (!window.desktopApi) { addToast('פתיחת תיקיית נתונים זמינה בגרסת Windows בלבד', 'info'); return; }
+    const result = await window.desktopApi.openDataFolder();
+    setDataFolder(result.folder);
+    if (result.error) addToast(`לא ניתן לפתוח את התיקייה: ${result.error}`, 'error');
+  };
 
   const handleSaveThresholds = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +85,13 @@ export const SettingsView: React.FC = () => {
 
   return (
     <div id="settings-view" className="space-y-6 animate-in fade-in duration-200">
+      <div className="bg-white p-4 rounded-2xl border border-blue-200 flex flex-wrap items-center justify-between gap-3">
+        <div><div className="font-bold text-sm">Leasing Team Manager <span className="text-blue-700">v{appVersion}</span></div><div className="text-[11px] text-slate-500">גרסה מקומית. הנתונים נשמרים בפרופיל המשתמש ואינם תלויים בתיקיית ההתקנה.</div>{dataFolder && <div className="text-[10px] font-mono text-slate-400 mt-1">{dataFolder}</div>}</div>
+        <button onClick={openDataFolder} className="px-3 py-2 text-xs font-bold bg-blue-50 text-blue-800 rounded-lg">הצג תיקיית נתוני המערכת</button>
+      </div>
+
+      <MonthClosingPanel />
+
       {/* Header Bar */}
       <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         <div>

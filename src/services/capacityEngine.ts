@@ -69,6 +69,39 @@ export function getMonthScheduleSummary(monthStr: string, settings: AppSettings)
   };
 }
 
+
+function getAbsenceHoursForMonth(
+  absence: Absence,
+  monthStr: string,
+  workDaysOfWeek: number[]
+): number {
+  const startMonth = absence.startDate.substring(0, 7);
+  const endMonth = absence.endDate.substring(0, 7);
+  if (monthStr < startMonth || monthStr > endMonth) return 0;
+  if (startMonth === endMonth) return Math.max(0, absence.hours || 0);
+
+  // Absence.hours represents the whole absence. For cross-month absences, distribute
+  // those hours proportionally by actual working days so hours are not double-counted
+  // in both months and a month fully contained by the range is not missed.
+  const start = new Date(`${absence.startDate}T12:00:00`);
+  const end = new Date(`${absence.endDate}T12:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return 0;
+
+  let totalWorkDays = 0;
+  let monthWorkDays = 0;
+  const d = new Date(start);
+  while (d <= end) {
+    if (workDaysOfWeek.includes(d.getDay())) {
+      totalWorkDays += 1;
+      const currentMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (currentMonth === monthStr) monthWorkDays += 1;
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  if (totalWorkDays === 0) return 0;
+  return Math.max(0, (absence.hours || 0) * (monthWorkDays / totalWorkDays));
+}
+
 export function computeEmployeeCapacity(
   employee: Employee,
   monthStr: string,
@@ -120,15 +153,10 @@ export function computeEmployeeCapacity(
   }
 
   // 2. Absence Hours in this month
-  const monthAbsences = absences.filter((a) => {
-    if (a.employeeId !== employee.id) return false;
-    // Check if start or end falls in this month
-    const aStartMonth = a.startDate.substring(0, 7);
-    const aEndMonth = a.endDate.substring(0, 7);
-    return aStartMonth === monthStr || aEndMonth === monthStr;
-  });
-
-  const absenceHours = monthAbsences.reduce((acc, a) => acc + (a.hours || 0), 0);
+  const workDaysForAbsence = settings.workDaysOfWeek || [0, 1, 2, 3, 4];
+  const absenceHours = absences
+    .filter((a) => a.employeeId === employee.id)
+    .reduce((acc, a) => acc + getAbsenceHoursForMonth(a, monthStr, workDaysForAbsence), 0);
 
   // 3. Net Capacity (Available)
   const netCapacity = Math.max(0, grossCapacity - absenceHours);
@@ -168,8 +196,11 @@ export function computeEmployeeCapacity(
   const contributingTasks: Task[] = [];
 
   for (const ta of employeeAllocations) {
-    taskAllocatedHours += ta.allocatedHours;
     const task = tasks.find((t) => t.id === ta.taskId);
+    // When capacity is filtered by client/project, tasks outside the filter are not
+    // present in `tasks`. Their allocations must not leak into the filtered KPI.
+    if (!task || task.planningStatus === 'draft') continue;
+    taskAllocatedHours += ta.allocatedHours;
     if (task) {
       if (!contributingTasks.some((t) => t.id === task.id)) {
         contributingTasks.push(task);
@@ -186,7 +217,7 @@ export function computeEmployeeCapacity(
   // but no explicit TaskAllocation was recorded, we consider them if remainingHours > 0
   const activeTasksWithoutAlloc = tasks.filter((t) => {
     if (t.assigneeId !== employee.id) return false;
-    if (t.status === 'הושלם' || t.status === 'בוטל') return false;
+    if (t.status === 'הושלם' || t.status === 'בוטל' || t.planningStatus === 'draft') return false;
     const hasExplicit = employeeAllocations.some((ta) => ta.taskId === t.id);
     if (hasExplicit) return false;
     const sMonth = t.plannedStartDate.substring(0, 7);

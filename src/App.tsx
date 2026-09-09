@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { DashboardView } from './components/dashboard/DashboardView';
+import { PlanningIntelligenceView } from './components/planning/PlanningIntelligenceView';
 import { DrilldownModal } from './components/dashboard/DrilldownModal';
 import { CapacityView } from './components/capacity/CapacityView';
 import { TasksView } from './components/tasks/TasksView';
@@ -56,6 +57,7 @@ const MainLayout: React.FC = () => {
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
           <div className="max-w-7xl mx-auto space-y-6">
             {currentTab === 'dashboard' && <DashboardView />}
+            {currentTab === 'planningIntelligence' && <PlanningIntelligenceView />}
             {currentTab === 'capacity' && <CapacityView />}
             {currentTab === 'tasks' && <TasksView onOpenTaskModal={handleEditTask} />}
             {currentTab === 'gantt' && <GanttView onSelectTask={handleEditTask} />}

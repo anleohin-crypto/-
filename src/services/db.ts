@@ -15,6 +15,8 @@ import {
   AbsenceRequest,
   TaskStatusConfig,
   TaskStatusHistory,
+  PlanningBaseline,
+  PlanningScenario,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -51,6 +53,8 @@ const STORAGE_KEYS = {
   AUDIT_LOGS: 'tc_cloud_audit_logs_v2',
   MIGRATION_META: 'tc_cloud_migration_meta_v2',
   CURRENT_USER_SESSION: 'tc_cloud_session_user_v2',
+  PLANNING_BASELINES: 'tc_cloud_planning_baselines_v3',
+  PLANNING_SCENARIOS: 'tc_cloud_planning_scenarios_v3',
 };
 
 // Real-time multi-tab / window sync channel
@@ -164,6 +168,22 @@ export const DataLayer = {
   },
   saveTasks(tasks: Task[]): void {
     safeSet(STORAGE_KEYS.TASKS, tasks);
+  },
+
+  // PLANNING BASELINES
+  getPlanningBaselines(): PlanningBaseline[] {
+    return safeGet<PlanningBaseline[]>(STORAGE_KEYS.PLANNING_BASELINES, []);
+  },
+  savePlanningBaselines(items: PlanningBaseline[]): void {
+    safeSet(STORAGE_KEYS.PLANNING_BASELINES, items);
+  },
+
+  // PLANNING SCENARIOS
+  getPlanningScenarios(): PlanningScenario[] {
+    return safeGet<PlanningScenario[]>(STORAGE_KEYS.PLANNING_SCENARIOS, []);
+  },
+  savePlanningScenarios(items: PlanningScenario[]): void {
+    safeSet(STORAGE_KEYS.PLANNING_SCENARIOS, items);
   },
 
   // TASK ALLOCATIONS
@@ -314,5 +334,7 @@ export const DataLayer = {
     safeSet(STORAGE_KEYS.NOTIFICATIONS, []);
     safeSet(STORAGE_KEYS.AUDIT_LOGS, []);
     safeSet(STORAGE_KEYS.CURRENT_USER_SESSION, INITIAL_USERS[0]);
+    safeSet(STORAGE_KEYS.PLANNING_BASELINES, []);
+    safeSet(STORAGE_KEYS.PLANNING_SCENARIOS, []);
   },
 };

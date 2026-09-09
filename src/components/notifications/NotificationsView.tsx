@@ -16,9 +16,10 @@ import { NotificationItem, NotificationSeverity } from '../../types';
 export const NotificationsView: React.FC = () => {
   const {
     notifications,
-    markNotificationAsRead,
-    markAllNotificationsAsRead,
+    markNotificationRead,
+    markAllNotificationsRead,
     clearAllNotifications,
+    restoreDismissedNotifications,
     setCurrentTab,
   } = useApp();
 
@@ -26,6 +27,7 @@ export const NotificationsView: React.FC = () => {
   const [unreadOnly, setUnreadOnly] = useState(false);
 
   const filteredNotifications = notifications.filter((n) => {
+    if (n.dismissed) return false;
     if (severityFilter !== 'all' && n.severity !== severityFilter) return false;
     if (unreadOnly && n.isRead) return false;
     return true;
@@ -71,7 +73,7 @@ export const NotificationsView: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={markAllNotificationsAsRead}
+            onClick={markAllNotificationsRead}
             className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
           >
             <CheckCheck className="w-4 h-4 text-blue-600" />
@@ -84,6 +86,14 @@ export const NotificationsView: React.FC = () => {
           >
             <Trash2 className="w-4 h-4" />
             <span>נקה התראות</span>
+          </button>
+
+          <button
+            onClick={restoreDismissedNotifications}
+            className="flex items-center gap-1.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-700 text-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
+            title="שחזור התראות שנוקו (Undo)"
+          >
+            <span>בטל ניקוי</span>
           </button>
         </div>
       </div>
@@ -122,7 +132,7 @@ export const NotificationsView: React.FC = () => {
           <div
             key={notif.id}
             onClick={() => {
-              markNotificationAsRead(notif.id);
+              markNotificationRead(notif.id);
               if (notif.linkTo) {
                 setCurrentTab(notif.linkTo as any);
               }

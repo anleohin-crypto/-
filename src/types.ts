@@ -268,7 +268,31 @@ export interface TaskAllocation {
   employeeId: string;
   month: string; // Format: "YYYY-MM", e.g. "2026-09"
   allocatedHours: number;
+  allocationDate?: string; // YYYY-MM-DD for day-level planning
+  source?: 'manual' | 'recurring' | 'import';
   notes?: string;
+}
+
+export type RecurrenceMode = 'none' | 'specific_dates' | 'monthly_day' | 'monthly_weekday' | 'weekly';
+
+export interface TaskRecurrence {
+  mode: RecurrenceMode;
+  hoursPerOccurrence: number;
+  startDate: string;
+  endDate: string;
+  dayOfMonth?: number;
+  dayOfWeek?: number; // 0=Sunday ... 6=Saturday
+  weekOfMonth?: number; // 1..5
+  specificDates?: string[];
+  exceptionDates?: string[];
+}
+
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  text: string;
+  createdAt: string;
+  createdBy: string;
 }
 
 export interface Task {
@@ -291,7 +315,155 @@ export interface Task {
   status: TaskStatus;
   isBillable: boolean;
   delayReason?: DelayReason;
-  notes?: string;
+  source?: 'לקוח' | 'פנימי' | 'רגולציה' | 'תקלה' | 'פיתוח' | 'תמיכה' | 'אחר';
+  planningStatus?: 'draft' | 'approved';
+  isMilestone?: boolean;
+  dependencyIds?: string[]; // legacy FS dependencies
+  dependencies?: TaskDependency[];
+  recurrence?: TaskRecurrence;
+  baselinePlannedStartDate?: string;
+  baselinePlannedEndDate?: string;
+  baselineEstimatedHours?: number;
+  dateChangeReason?: string;
+  comments?: TaskComment[];
+  notes?: string; // legacy field; new notes should use comments
+}
+
+
+export type DependencyType = 'FS' | 'SS' | 'FF' | 'SF';
+
+export interface TaskDependency {
+  id: string;
+  predecessorTaskId: string;
+  successorTaskId: string;
+  type: DependencyType;
+  lagDays: number;
+  createdAt: string;
+  createdBy?: string;
+}
+
+export interface BaselineTaskSnapshot {
+  taskId: string;
+  taskNumber: string;
+  name: string;
+  clientId: string;
+  projectId?: string;
+  assigneeId: string;
+  status: TaskStatus;
+  plannedStartDate: string;
+  plannedEndDate: string;
+  deadline: string;
+  estimatedHours: number;
+  actualHours: number;
+  remainingHours: number;
+  allocations: { month: string; hours: number; allocationDate?: string }[];
+}
+
+export interface PlanningBaseline {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  createdBy: string;
+  scope: 'all' | 'client' | 'project' | 'employee';
+  scopeId?: string;
+  tasks: BaselineTaskSnapshot[];
+}
+
+export type PlanningIssueSeverity = 'info' | 'warning' | 'critical';
+export type PlanningIssueType =
+  | 'overload'
+  | 'underutilization'
+  | 'deadline_risk'
+  | 'overdue'
+  | 'absence_conflict'
+  | 'dependency_block'
+  | 'planned_actual_variance'
+  | 'idle_high'
+  | 'stalled_client'
+  | 'future_overload';
+
+export interface PlanningIssue {
+  id: string;
+  type: PlanningIssueType;
+  severity: PlanningIssueSeverity;
+  title: string;
+  problem: string;
+  cause: string;
+  impact: string;
+  recommendation?: string;
+  targetType: 'task' | 'employee' | 'client' | 'project' | 'team';
+  targetId?: string;
+  relatedTaskIds?: string[];
+  metricValue?: number;
+  createdAt: string;
+}
+
+
+export type PlanningRecommendationAction = 'move_task' | 'reassign_task' | 'split_task' | 'shift_dates' | 'change_priority';
+
+export interface PlanningRecommendationChange {
+  taskId: string;
+  taskNumber?: string;
+  taskName?: string;
+  oldAssigneeId?: string;
+  newAssigneeId?: string;
+  oldStartDate?: string;
+  newStartDate?: string;
+  oldEndDate?: string;
+  newEndDate?: string;
+  hoursMoved?: number;
+  splitToEmployeeId?: string;
+  splitHours?: number;
+}
+
+
+export interface PlanningRecommendation {
+  id: string;
+  issueId?: string;
+  action: PlanningRecommendationAction;
+  title: string;
+  rationale: string;
+  impact: string;
+  score: number;
+  changes: PlanningRecommendationChange[];
+  requiresApproval: true;
+}
+
+export interface CriticalPathTask {
+  taskId: string;
+  earliestStartDay: number;
+  earliestFinishDay: number;
+  latestStartDay: number;
+  latestFinishDay: number;
+  totalFloatDays: number;
+  isCritical: boolean;
+}
+
+export interface ForecastPeriod {
+  month: string;
+  capacity: number;
+  planned: number;
+  billable: number;
+  nonBillable: number;
+  idle: number;
+  overload: number;
+  utilization: number;
+}
+
+export interface PlanningScenario {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  createdBy: string;
+  changes: {
+    taskId: string;
+    plannedStartDate?: string;
+    plannedEndDate?: string;
+    assigneeId?: string;
+    estimatedHours?: number;
+  }[];
 }
 
 export interface FixedAllocation {
@@ -354,6 +526,13 @@ export interface NotificationItem {
   dismissed?: boolean;
 }
 
+export interface AuditChange {
+  fieldName: string;
+  fieldLabel?: string;
+  oldValue: unknown;
+  newValue: unknown;
+}
+
 export interface AuditLog {
   id: string;
   timestamp: string;
@@ -361,9 +540,25 @@ export interface AuditLog {
   action: string;
   entityType: string;
   entityId: string;
+  entityLabel?: string;
   fieldName: string;
-  oldValue: string | number | null;
-  newValue: string | number | null;
+  oldValue: string | number | boolean | null;
+  newValue: string | number | boolean | null;
+  details?: string;
+  changes?: AuditChange[];
+  source?: 'ui' | 'excel_import' | 'system' | 'backup';
+}
+
+export type ImportEntityType = 'tasks' | 'employees' | 'clients' | 'absences';
+export type DuplicateRisk = 'none' | 'medium' | 'high' | 'exact';
+
+export interface DuplicateMatch {
+  existingId: string;
+  existingLabel: string;
+  risk: DuplicateRisk;
+  score: number;
+  matchedFields: string[];
+  reason: string;
 }
 
 export interface ShortenedDay {
@@ -401,6 +596,7 @@ export interface AppSettings {
 
   // Custom Task Statuses managed by Admin
   taskStatuses?: TaskStatusConfig[];
+  closedMonths?: string[]; // locked historical months, YYYY-MM
 
   underAllocationThreshold: number; // default 75 (%)
   normalUtilizationMin?: number;
