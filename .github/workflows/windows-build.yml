@@ -30,6 +30,21 @@ jobs:
       - name: TypeScript validation
         run: npm run lint
 
+      - name: Static release and security checks
+        run: npm run test:static
+
+      - name: Core regression tests
+        run: npm run test:core
+
+      - name: XLSX integration tests
+        run: npm run test:xlsx
+
+      - name: Backup and restore regression tests
+        run: npm run test:backup
+
+      - name: Production Vite build
+        run: npm run build
+
       - name: Build Windows x64 installer
         run: npm run dist:win
 
