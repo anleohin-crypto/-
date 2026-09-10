@@ -1,7 +1,7 @@
 {
   "name": "leasing-team-manager-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "מערכת מקומית לניהול צוות, קיבולת ומשימות",
   "type": "module",
   "main": "electron/main.mjs",
@@ -12,7 +12,12 @@
     "preview": "vite preview --host=127.0.0.1",
     "lint": "tsc --noEmit",
     "desktop": "electron .",
-    "dist:win": "npm run lint && npm run build && electron-builder --win nsis --x64 --publish never"
+    "dist:win": "npm run lint && npm run build && electron-builder --win nsis --x64 --publish never",
+    "test:core": "tsx tests/core-regression.ts",
+    "test:xlsx": "tsx tests/xlsx-integration.ts",
+    "test:release": "npm run lint && npm run test:static && npm run test:core && npm run test:xlsx && npm run test:backup && npm run build",
+    "test:backup": "tsx tests/backup-regression.ts",
+    "test:static": "node tests/release-static.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -54,7 +59,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

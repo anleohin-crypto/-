@@ -23,13 +23,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-
+    
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
       - name: TypeScript validation
         run: npm run lint
+
+      - name: Static release/security checks
+        run: npm run test:static
+
+      - name: Core regression tests
+        run: npm run test:core
+
+      - name: Excel import/export integration tests
+        run: npm run test:xlsx
+
+      - name: Backup and restore regression tests
+        run: npm run test:backup
+
+      - name: Production web build
+        run: npm run build
 
       - name: Build Windows x64 installer
         run: npm run dist:win
