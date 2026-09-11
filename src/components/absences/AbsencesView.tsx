@@ -78,16 +78,17 @@ export const AbsencesView: React.FC = () => {
 
   const getEmployeeName = (id: string) => employees.find((e) => e.id === id)?.name || id;
 
-  // Calculate working days (excluding Friday & Saturday)
+  // Calculate working days according to the configured organization work week.
   const calculateWorkDays = (start: string, end: string) => {
     if (!start || !end || end < start) return 0;
+    const configuredWorkDays = settings.workDaysOfWeek || [0, 1, 2, 3, 4];
     const dStart = new Date(start);
     const dEnd = new Date(end);
     let count = 0;
     const cur = new Date(dStart);
     while (cur <= dEnd) {
       const day = cur.getDay();
-      if (day !== 5 && day !== 6) {
+      if (configuredWorkDays.includes(day)) {
         count++;
       }
       cur.setDate(cur.getDate() + 1);
@@ -820,7 +821,7 @@ export const AbsencesView: React.FC = () => {
               </div>
 
               <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center justify-between text-slate-600">
-                <span>ימי עבודה מחושבים בטווח (ללא סופ״ש):</span>
+                <span>ימי עבודה מחושבים בטווח לפי הגדרות המערכת:</span>
                 <span className="font-bold text-slate-900 font-mono text-sm">
                   {teamWorkDays} ימי עבודה
                 </span>
@@ -1117,7 +1118,7 @@ export const AbsencesView: React.FC = () => {
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-900 font-mono font-bold"
                 />
                 <span className="text-[10px] text-slate-400 mt-0.5 block">
-                  מחושב לפי ימי עבודה בטווח (ללא ימי שישי-שבת)
+                  מחושב לפי ימי העבודה המוגדרים במערכת
                 </span>
               </div>
 
