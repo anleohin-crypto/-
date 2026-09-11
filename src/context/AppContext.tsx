@@ -128,7 +128,7 @@ interface AppContextType {
 
   // Users (Admin)
   addUser: (user: Omit<User, 'uid' | 'createdAt' | 'updatedAt'>) => { success: boolean; error?: string };
-  updateUser: (user: User) => void;
+  updateUser: (user: User) => { success: boolean; error?: string };
   toggleUserActive: (uid: string) => void;
 
   // Clients & Projects
@@ -1202,29 +1202,85 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   const updateUser = (user: User) => {
-    setUsers((prev) => prev.map((u) => (u.uid === user.uid ? { ...user, updatedAt: new Date().toISOString() } : u)));
-    if (currentUser?.uid === user.uid) {
-      setCurrentUser(user);
+    const previous = users.find((u) => u.uid === user.uid);
+    if (!previous) {
+      const error = 'המשתמש לא נמצא';
+      addToast(error, 'error');
+      return { success: false, error };
     }
+
+    const cleanEmpNo = user.employeeNumber.trim();
+    const cleanEmail = user.email.trim().toLowerCase();
+    const duplicateEmpNo = users.some(
+      (u) => u.uid !== user.uid && u.employeeNumber.trim() === cleanEmpNo
+    );
+    if (duplicateEmpNo) {
+      const error = `מספר עובד ${cleanEmpNo} כבר קיים במערכת`;
+      addToast(error, 'error');
+      return { success: false, error };
+    }
+
+    const duplicateEmail = users.some(
+      (u) => u.uid !== user.uid && u.email.trim().toLowerCase() === cleanEmail
+    );
+    if (duplicateEmail) {
+      const error = `כתובת מייל ${user.email} כבר קיימת במערכת`;
+      addToast(error, 'error');
+      return { success: false, error };
+    }
+
+    const updatedAt = new Date().toISOString();
+    const normalizedUser: User = {
+      ...user,
+      employeeNumber: cleanEmpNo,
+      email: user.email.trim(),
+      updatedAt,
+    };
+
+    setUsers((prev) =>
+      prev.map((u) => (u.uid === normalizedUser.uid ? normalizedUser : u))
+    );
+
+    if (currentUser?.uid === normalizedUser.uid) {
+      setCurrentUser(normalizedUser);
+    }
+
+    // The linked Employee must be located using the PREVIOUS employee number.
+    // Otherwise changing employeeNumber disconnects the User from its Employee record.
     setEmployees((prev) =>
       prev.map((e) =>
-        e.employeeNumber === user.employeeNumber
-          ? { ...e, name: user.fullName, email: user.email, phone: user.phone, isActive: user.active }
+        e.employeeNumber === previous.employeeNumber
+          ? {
+              ...e,
+              employeeNumber: normalizedUser.employeeNumber,
+              name: normalizedUser.fullName,
+              email: normalizedUser.email,
+              phone: normalizedUser.phone,
+              role: normalizedUser.title || e.role,
+              teamId: normalizedUser.teamId,
+              isActive: normalizedUser.active,
+            }
           : e
       )
     );
+
     StorageService.logAudit({
       user: currentUser?.fullName || 'מנהל מערכת',
       action: 'עדכון משתמש',
       entityType: 'User',
-      entityId: user.uid,
+      entityId: normalizedUser.uid,
+      entityLabel: normalizedUser.fullName,
       fieldName: 'profile',
-      oldValue: null,
-      newValue: user.fullName,
+      oldValue: previous.employeeNumber,
+      newValue: normalizedUser.employeeNumber,
+      details: previous.employeeNumber !== normalizedUser.employeeNumber
+        ? `מספר עובד שונה מ-${previous.employeeNumber} ל-${normalizedUser.employeeNumber}`
+        : 'פרטי משתמש עודכנו',
+      source: 'ui',
     });
-    addToast(`פרטי המשתמש ${user.fullName} עודכנו`);
+    addToast(`פרטי המשתמש ${normalizedUser.fullName} עודכנו`);
+    return { success: true };
   };
-
   const toggleUserActive = (uid: string) => {
     const target = users.find((u) => u.uid === uid);
     if (!target) return;
