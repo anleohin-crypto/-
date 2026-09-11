@@ -1,0 +1,37 @@
+name: One-time context deletion fix
+
+on:
+  push:
+    branches: [desktop-v1]
+    paths:
+      - 'scripts/patch-context-deletions.mjs'
+      - '.github/workflows/one-time-context-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-context:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout desktop branch
+        uses: actions/checkout@v4
+        with:
+          ref: desktop-v1
+          fetch-depth: 0
+
+      - name: Apply guarded context patch
+        run: node scripts/patch-context-deletions.mjs
+
+      - name: Commit patch if needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No context changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/context/AppContext.tsx
+          git commit -m "Fix broken employee client project delete actions"
+          git push origin HEAD:desktop-v1
