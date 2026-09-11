@@ -797,10 +797,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newAbsence: Absence = { ...absenceData, id: newId };
     const emp = employees.find((e) => e.id === newAbsence.employeeId);
 
-    // Calculate if this absence causes over-allocation
+    // Calculate conflict against the absence month itself, regardless of the month currently displayed in the UI.
     const month = newAbsence.startDate.substring(0, 7);
-    const existingMetric = teamMetrics.employeeMetrics.find(
-      (em) => em.employeeId === newAbsence.employeeId && em.month === month
+    const monthMetrics = computeTeamCapacity(
+      month,
+      employees,
+      tasks,
+      taskAllocations,
+      fixedAllocations,
+      absences,
+      monthlyCapacities,
+      settings,
+      'all',
+      'all',
+      'all'
+    );
+    const existingMetric = monthMetrics.employeeMetrics.find(
+      (em) => em.employeeId === newAbsence.employeeId
     );
 
     let hasConflict = false;
@@ -890,9 +903,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         collectiveTitle: input.title,
       };
 
-      // Check conflict
-      const existingMetric = teamMetrics.employeeMetrics.find(
-        (em) => em.employeeId === emp.id && em.month === month
+      // Check conflict against the target month, not the currently selected UI month.
+      const monthMetrics = computeTeamCapacity(
+        month,
+        employees,
+        tasks,
+        taskAllocations,
+        fixedAllocations,
+        absences,
+        monthlyCapacities,
+        settings,
+        'all',
+        'all',
+        'all'
+      );
+      const existingMetric = monthMetrics.employeeMetrics.find(
+        (em) => em.employeeId === emp.id
       );
       if (existingMetric) {
         const projectedNet = Math.max(0, existingMetric.netCapacity - totalHours);
