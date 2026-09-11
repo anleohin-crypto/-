@@ -14,6 +14,10 @@ const pkg = JSON.parse(read('package.json'));
 const html = read('index.html');
 const electronMain = read('electron/main.mjs');
 const workflow = read('.github/workflows/windows-build.yml');
+const dashboard = read('src/components/dashboard/DashboardView.tsx');
+const drilldown = read('src/components/dashboard/DrilldownModal.tsx');
+const importExport = read('src/components/importExport/ImportExportView.tsx');
+const notifications = read('src/components/notifications/NotificationsView.tsx');
 
 check('release version is 1.1.0', pkg.version === '1.1.0', `got ${pkg.version}`);
 check('Windows build never implicitly publishes', /--publish\s+never/.test(pkg.scripts?.['dist:win'] || ''));
@@ -26,6 +30,22 @@ check('workflow runs core regression', /npm run test:core/.test(workflow));
 check('workflow runs XLSX integration', /npm run test:xlsx/.test(workflow));
 check('workflow runs backup regression', /npm run test:backup/.test(workflow));
 check('workflow performs production build before installer', workflow.indexOf('npm run build') < workflow.indexOf('npm run dist:win'));
+
+const dashboardDrilldowns = [...dashboard.matchAll(/openDrilldown\(\s*['"]([^'"]+)['"]/g)].map(m => m[1]);
+const uniqueDashboardDrilldowns = [...new Set(dashboardDrilldowns)];
+const missingDrilldownRenderers = uniqueDashboardDrilldowns.filter(type => !drilldown.includes(`drilldown.type === '${type}'`) && !drilldown.includes(`drilldown.type === "${type}"`));
+check(
+  'every Dashboard drilldown action has a matching renderer',
+  missingDrilldownRenderers.length === 0,
+  missingDrilldownRenderers.length ? `missing: ${missingDrilldownRenderers.join(', ')}` : ''
+);
+
+for (const entity of ['tasks', 'clients', 'employees', 'absences']) {
+  check(`Excel import supports ${entity}`, importExport.includes(`${entity}:`) || importExport.includes(`'${entity}'`) || importExport.includes(`"${entity}"`));
+}
+check('Excel import exposes a file picker', /type=["']file["']/.test(importExport) && /accept=["'][^"']*xlsx/.test(importExport));
+check('notifications persist per-item dismissal state', /dismissNotification/.test(notifications) && /dismissed/.test(notifications));
+check('notifications support clear-all and restore', /clearAllNotifications/.test(notifications) && /restoreDismissedNotifications/.test(notifications));
 
 const sourceFiles = [];
 function walk(dir) {
