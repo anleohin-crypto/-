@@ -35,3 +35,5 @@ jobs:
           git add src/context/AppContext.tsx
           git commit -m "Fix broken employee client project delete actions"
           git push origin HEAD:desktop-v1
+
+# One-time workflow: remove after the guarded patch is committed.
