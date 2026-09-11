@@ -110,7 +110,7 @@ export const UsersManagementView: React.FC = () => {
     const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`;
 
     if (editingUser) {
-      updateUser({
+      const result = updateUser({
         ...editingUser,
         employeeNumber: formData.employeeNumber.trim(),
         firstName: formData.firstName.trim(),
@@ -123,6 +123,10 @@ export const UsersManagementView: React.FC = () => {
         teamId: formData.teamId,
         active: formData.active,
       });
+      if (!result.success) {
+        setFormError(result.error || 'שגיאה בעדכון המשתמש');
+        return;
+      }
       setEditingUser(null);
     } else {
       const result = addUser({
