@@ -1,0 +1,37 @@
+name: One-time absence conflict month fix
+
+on:
+  push:
+    branches: [desktop-v1]
+    paths:
+      - 'scripts/patch-absence-conflict-month.mjs'
+      - '.github/workflows/one-time-absence-conflict-month.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-context:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout desktop branch
+        uses: actions/checkout@v4
+        with:
+          ref: desktop-v1
+          fetch-depth: 0
+
+      - name: Apply guarded conflict-month patch
+        run: node scripts/patch-absence-conflict-month.mjs
+
+      - name: Commit patch if needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No conflict-month changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/context/AppContext.tsx
+          git commit -m "Fix absence conflict checks for target month"
+          git push origin HEAD:desktop-v1
