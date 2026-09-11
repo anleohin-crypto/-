@@ -124,6 +124,7 @@ interface AppContextType {
   addEmployee: (emp: Omit<Employee, 'id'>) => void;
   updateEmployee: (emp: Employee) => void;
   toggleEmployeeStatus: (empId: string) => void;
+  deleteEmployee: (empId: string) => { success: boolean; error?: string };
 
   // Users (Admin)
   addUser: (user: Omit<User, 'uid' | 'createdAt' | 'updatedAt'>) => { success: boolean; error?: string };
@@ -133,7 +134,9 @@ interface AppContextType {
   // Clients & Projects
   addClient: (client: Omit<Client, 'id'>) => void;
   updateClient: (client: Client) => void;
+  deleteClient: (clientId: string) => { success: boolean; error?: string };
   addProject: (project: Omit<Project, 'id'>) => void;
+  deleteProject: (projectId: string) => { success: boolean; error?: string };
 
   // Absences
   addAbsence: (absence: Omit<Absence, 'id'>) => { hasConflict: boolean; warningMsg?: string };
@@ -658,6 +661,50 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
   };
 
+  const deleteEmployee = (empId: string) => {
+    const emp = employees.find((e) => e.id === empId);
+    if (!emp) return { success: false, error: 'עובד לא נמצא' };
+
+    const taskCount = tasks.filter((t) => t.assigneeId === empId).length;
+    const absenceCount = absences.filter((a) => a.employeeId === empId).length;
+    const fixedCount = fixedAllocations.filter((f) => f.employeeId === empId).length;
+    const capacityCount = monthlyCapacities.filter((c) => c.employeeId === empId).length;
+    const linkedUserCount = emp.employeeNumber
+      ? users.filter((u) => u.employeeNumber === emp.employeeNumber).length
+      : 0;
+
+    const dependencyCount = taskCount + absenceCount + fixedCount + capacityCount + linkedUserCount;
+    if (dependencyCount > 0) {
+      const details = [
+        taskCount ? `${taskCount} משימות` : '',
+        absenceCount ? `${absenceCount} היעדרויות` : '',
+        fixedCount ? `${fixedCount} הקצאות קבועות` : '',
+        capacityCount ? `${capacityCount} הגדרות קיבולת` : '',
+        linkedUserCount ? `${linkedUserCount} משתמשים מקושרים` : '',
+      ].filter(Boolean).join(', ');
+      const error = `לא ניתן למחוק את ${emp.name} כל עוד קיימים נתונים מקושרים: ${details}. יש להסיר/להעביר אותם תחילה או להשבית את העובד.`;
+      addToast(error, 'error');
+      return { success: false, error };
+    }
+
+    setEmployees((prev) => prev.filter((e) => e.id !== empId));
+    if (filterEmployeeId === empId) setFilterEmployeeId('all');
+    StorageService.logAudit({
+      user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת',
+      action: 'מחיקת עובד',
+      entityType: 'Employee',
+      entityId: empId,
+      entityLabel: emp.name,
+      fieldName: 'deleted',
+      oldValue: emp.name,
+      newValue: null,
+      details: 'העובד נמחק לאחר בדיקת קשרים',
+      source: 'ui',
+    });
+    addToast(`העובד/ת ${emp.name} נמחק/ה בהצלחה`, 'info');
+    return { success: true };
+  };
+
   const addClient = (clientData: Omit<Client, 'id'>) => {
     const newId = 'cli-' + Date.now();
     const newClient: Client = { ...clientData, id: newId };
@@ -678,6 +725,71 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     const newProj: Project = { ...projectData, id: newId };
     setProjects((prev) => [...prev, newProj]);
     addToast(`הפרויקט ${newProj.name} נוסף בהצלחה`);
+  };
+
+  const deleteClient = (clientId: string) => {
+    const client = clients.find((c) => c.id === clientId);
+    if (!client) return { success: false, error: 'לקוח לא נמצא' };
+
+    const taskCount = tasks.filter((t) => t.clientId === clientId).length;
+    const projectCount = projects.filter((p) => p.clientId === clientId).length;
+    const fixedCount = fixedAllocations.filter((f) => f.clientId === clientId).length;
+    if (taskCount + projectCount + fixedCount > 0) {
+      const details = [
+        taskCount ? `${taskCount} משימות` : '',
+        projectCount ? `${projectCount} פרויקטים` : '',
+        fixedCount ? `${fixedCount} הקצאות קבועות` : '',
+      ].filter(Boolean).join(', ');
+      const error = `לא ניתן למחוק את הלקוח ${client.name} כל עוד קיימים נתונים מקושרים: ${details}.`;
+      addToast(error, 'error');
+      return { success: false, error };
+    }
+
+    setClients((prev) => prev.filter((c) => c.id !== clientId));
+    if (filterClientId === clientId) setFilterClientId('all');
+    StorageService.logAudit({
+      user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת',
+      action: 'מחיקת לקוח',
+      entityType: 'Client',
+      entityId: clientId,
+      entityLabel: client.name,
+      fieldName: 'deleted',
+      oldValue: client.name,
+      newValue: null,
+      details: 'הלקוח נמחק לאחר בדיקת קשרים',
+      source: 'ui',
+    });
+    addToast(`הלקוח ${client.name} נמחק בהצלחה`, 'info');
+    return { success: true };
+  };
+
+  const deleteProject = (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return { success: false, error: 'פרויקט לא נמצא' };
+
+    const taskCount = tasks.filter((t) => t.projectId === projectId).length;
+    if (taskCount > 0) {
+      const error = `לא ניתן למחוק את הפרויקט ${project.name} כי קיימות ${taskCount} משימות המשויכות אליו.`;
+      addToast(error, 'error');
+      return { success: false, error };
+    }
+
+    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    if (filterProjectId === projectId) setFilterProjectId('all');
+    StorageService.logAudit({
+      user: currentUser?.fullName || settings.activeUserName || 'מנהל מערכת',
+      action: 'מחיקת פרויקט',
+      entityType: 'Project',
+      entityId: projectId,
+      entityLabel: project.name,
+      fieldName: 'deleted',
+      oldValue: project.name,
+      newValue: null,
+      details: 'הפרויקט נמחק לאחר בדיקת קשרים',
+      source: 'ui',
+    });
+    addToast(`הפרויקט ${project.name} נמחק בהצלחה`, 'info');
+    return { success: true };
   };
 
   const addAbsence = (absenceData: Omit<Absence, 'id'>) => {
@@ -1403,12 +1515,15 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addEmployee,
         updateEmployee,
         toggleEmployeeStatus,
+        deleteEmployee,
         addUser,
         updateUser,
         toggleUserActive,
         addClient,
         updateClient,
+        deleteClient,
         addProject,
+        deleteProject,
         addAbsence,
         deleteAbsence,
         addTeamWideAbsence,
